@@ -1,0 +1,275 @@
+package blue;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Vector;
+
+import javax.bluetooth.BluetoothStateException;
+import javax.bluetooth.DataElement;
+import javax.bluetooth.DeviceClass;
+import javax.bluetooth.DiscoveryAgent;
+import javax.bluetooth.DiscoveryListener;
+import javax.bluetooth.LocalDevice;
+import javax.bluetooth.RemoteDevice;
+import javax.bluetooth.ServiceRecord;
+import javax.bluetooth.UUID;
+import javax.microedition.io.Connector;
+import javax.microedition.io.StreamConnection;
+import javax.swing.JOptionPane;
+
+public class Bluetooth {
+ private Object inquiryCompletedEvent = new Object();
+
+ private Vector<RemoteDevice> devicesDiscovered;//검색한 장치들을 담을 vector 
+ 
+ private LocalDevice localDevice;
+ private DiscoveryAgent agent;
+ 
+ private boolean blFindState = false; 
+ private boolean blConnectState = false; 
+ 
+ /* Create map to return Bluetooth device address, name and URL */
+ final Map<String, List<String>> mapReturnResult = new HashMap<String, List<String>>();//블루투스 장치의 이름과 url을 저장하기 위한 map
+    
+ //블루투스 서비스에는 각각의 UUID가 있다. 
+ //드론에 장착하는 bluetooth장치와 연결하기 위해서는 0x1105를 사용하면 된다.
+ //나머지 UUID값은 나중을 위해 선언만 해둔다.
+ private UUID OBEX_OBJECT_PUSH_PROFILE = new UUID(0x1105);// To find push object service 
+ //private UUID OBEX_FILE_TRANSFER_PROFILE = new UUID(0x1106);// To find file transfer service 
+ //private UUID HANDS_FREE = new UUID(0x111E);// To find hands free service
+    
+ //searviceSearch에서 찾을 서비스를 배열에 넣는다.
+ private final UUID[] searchUuidSet = new UUID[]{OBEX_OBJECT_PUSH_PROFILE};
+ 
+ private int URL_ATTRIBUTE = 0X0100;// Get URL attribute from bluetooth service
+ private int[] attrIDs = new int[]{URL_ATTRIBUTE};
+    
+ private static String url;
+ 
+ //블루투스 장치와 연결할 때 사용하는 변수
+ private StreamConnection streamConnection;//주소값을 이용하여 장치와 연결하는 변수
+ 
+ private InputStream inStream = null;
+ private OutputStream outStream = null;
+ 
+ //생성자
+ public Bluetooth(){
+  blFindState = false;
+  blConnectState = false;
+ }
+ 
+
+ //장치와 장치의 서비스를 검색하는 메소드
+ public void deviceSearch() /*throws BluetoothStateException*/{
+  //device search
+  devicesDiscovered = new Vector<RemoteDevice>();
+  devicesDiscovered.clear();//vector 초기화
+  blFindState = false;
+  
+  try{
+   synchronized (inquiryCompletedEvent) {
+    localDevice = LocalDevice.getLocalDevice();//프로그램의 블루투스 기기를 가져옴
+    agent = localDevice.getDiscoveryAgent();//기기에서 discovery agent를 실행
+    
+    boolean started = agent.startInquiry(DiscoveryAgent.GIAC, listener);
+     
+    if(started){ 
+     System.out.println("wait for device inquiry to complete...");
+     inquiryCompletedEvent.wait();
+    }
+   }
+  }catch(Exception e){
+   debug("Error in findBluetoothDevice()");
+  }
+  
+  //service search
+  for(Enumeration<RemoteDevice> en = devicesDiscovered.elements(); en.hasMoreElements();){
+   RemoteDevice btDevice = (RemoteDevice) en.nextElement();//검색한 장치를 가져옴
+   
+   List<String> listDeviceDetails = new ArrayList<String>();//장치의 상세 정보를 담을 리스트
+   
+   try{
+    listDeviceDetails.add(btDevice.getBluetoothAddress());
+    
+    mapReturnResult.put(btDevice.getFriendlyName(false), listDeviceDetails);//장치 이름과 주소를 map에 저장
+    
+    synchronized (inquiryCompletedEvent) {
+     LocalDevice.getLocalDevice().getDiscoveryAgent().searchServices(attrIDs, searchUuidSet, btDevice, listener);
+     inquiryCompletedEvent.wait();
+     
+     blFindState = true;//검색이 완료되었으므로 true
+    }
+   }
+   catch(Exception e){
+    e.printStackTrace();
+   }
+  }
+  //return mapReturnResult;//검색한 장치의 이름과 주소가 담긴  Map을 반환한다.
+ }
+ 
+ 
+ 
+ //블루투스 리스너
+ //블루투스 스택으로부터 전달되는 이벤트를 받는다
+ DiscoveryListener listener = new DiscoveryListener() 
+ {
+  @Override
+  public void deviceDiscovered(RemoteDevice btDevice, DeviceClass cod) {//디바이스가 발견됬을 때 실행
+   try{
+     /* pair되어있는 블루투스 장치나 주위 장치들을 저장 */
+    devicesDiscovered.addElement(btDevice);
+   }
+   catch(Exception e){
+    System.out.println("error : Add Bluetooth device");
+   }
+   
+  }
+
+  @Override
+  public void inquiryCompleted(int discType) {//inquiry가 종료될 때 실행
+   blFindState = true;
+   synchronized(inquiryCompletedEvent){
+    inquiryCompletedEvent.notify();
+   }
+  }
+
+ 
+  
+  
+  @Override
+  public void servicesDiscovered(int transID, ServiceRecord[] servRecord) {//서비스가 발견되었을 때 실행
+   for (int i = 0; i < servRecord.length; i++) {
+    // 블루투스 장치의 URL을 가져온다.
+    url = servRecord[i].getConnectionURL(ServiceRecord.NOAUTHENTICATE_NOENCRYPT, false);
+    
+    if (url == null) {
+     continue;
+    }
+                
+    String temporaryString = "";
+
+    RemoteDevice rd = servRecord[i].getHostDevice();//블루투스 장치를 가져온다.
+                
+    DataElement serviceName = servRecord[i].getAttributeValue(URL_ATTRIBUTE);// Get attribute from ServiceRecord 
+    
+    if (serviceName != null) {         
+     temporaryString = serviceName.getValue() + "\n" + url;
+     
+     /* Put it in map */
+     mapReturnResult.get(rd.getBluetoothAddress()).add(temporaryString);
+    } 
+    else {
+     temporaryString = "Uknown service \n" + url;
+     
+     /* Put it in map */
+     mapReturnResult.get(rd.getBluetoothAddress()).add(temporaryString);
+    }
+            }
+  }
+  
+  @Override
+  public void serviceSearchCompleted(int transID, int respCode) {//서비스 검색이 종료되었을 때 실행
+   synchronized(inquiryCompletedEvent){
+    inquiryCompletedEvent.notifyAll();
+   }
+  }
+ };
+ 
+
+ 
+ //인자로 들어온 장치의 주소로 블루투스 장치와 연결하는 메소드 
+ public void connectToDevice(String serverURL){
+  try{
+   this.streamConnection = (StreamConnection) Connector.open("btspp://" + serverURL + ":1", Connector.READ_WRITE, true);
+   
+   blConnectState = true;//연결이 되었으므로 true
+   
+   this.outStream = streamConnection.openOutputStream();//연결한 장치에 outputstream을 생성
+   this.inStream = streamConnection.openInputStream();//연결한 장치에 intputstream을 생성
+   
+  }
+  catch (Exception e) {
+   JOptionPane.showMessageDialog(null, "블루투스 장치에 연결할 수 없습니다.", "", JOptionPane.WARNING_MESSAGE);
+   debug("Connecting Error");
+  }
+ } 
+ 
+ //블루투스 장치의 연결과 Stream을 해제하는 메소드
+ public void disconnectDevice(){
+  try {
+   //모든 연결을 닫아준다
+   this.streamConnection.close();
+   this.outStream.close();
+   this.inStream.close();
+   
+   blConnectState = false;
+  } catch (IOException e) {
+   debug("Disconnecting Error");
+  }
+     
+ }
+ 
+ 
+ public void write(byte[] data){
+  try {
+   this.outStream.write(data);
+   this.outStream.flush();
+  } catch (IOException e) {
+   debug("Write error");
+  }
+ }
+ 
+ public byte read(){
+  byte readData = 0;
+  try {
+   readData =  (byte) this.inStream.read();
+  } catch (IOException e) {
+   debug("Read Error");
+  }
+  return readData;
+ }
+ 
+ //데이터가 들어오는 상태를 메소드
+ public boolean available(){
+  boolean state = false;
+  try {
+   if (blConnectState)
+    state = inStream.available() > 0;
+   } catch (IOException e) {
+   e.printStackTrace();
+  }
+  return state;
+ }
+ 
+ 
+ public InputStream getInputStream(){
+  return this.inStream;
+ }
+     
+ public OutputStream getOutputStream(){
+  return this.outStream;
+ }
+ public String getURL(){
+	  return blue.Bluetooth.url;
+ }
+ 
+ //블루투스의 검색 상태를 반환하는 메소드
+ public boolean getDeviceSearchingState(){
+  return blFindState;
+ }
+ 
+ //블루투스 장치의 연결 상태를 반환하는 메소드
+ public boolean getDeviceConnectState(){
+  return blConnectState;
+ }
+ 
+ 
+ private void debug(String st){
+  System.out.println("Bluetooth : " + st);
+ }
+}

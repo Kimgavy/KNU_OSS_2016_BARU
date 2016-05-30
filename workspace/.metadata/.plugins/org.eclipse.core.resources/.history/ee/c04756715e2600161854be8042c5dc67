@@ -1,0 +1,64 @@
+package blue;
+import java.awt.MouseInfo;
+import java.awt.Point;
+import java.awt.Robot;
+import java.io.DataInputStream;
+ 
+import javax.bluetooth.DiscoveryAgent;
+import javax.bluetooth.LocalDevice;
+import javax.bluetooth.UUID;
+import javax.microedition.io.Connector;
+import javax.microedition.io.StreamConnection;
+import javax.microedition.io.StreamConnectionNotifier;
+ 
+ 
+public class receiver {
+    public final int PX = 0;
+    public final int PY = 1;
+    public final UUID uuid = new UUID("fa87c0d0afac11de8a390800200c9a66", false); //페이링 UUID
+    public final String name = "remoteMouse Server"; // 서버이름
+    public final String url = "btspp://localhost:" + uuid.toString() //서머이름이랑 UUID로 url만들기
+            + ";name=" + name;// + ";authenticate=false;encrypt=false;";
+    LocalDevice local = null;
+    StreamConnectionNotifier server = null;
+    StreamConnection conn = null;
+ 
+    public receiver() {
+        try {
+ 
+            Point p;
+            Robot r = new Robot();
+            
+            System.out.println("다른 디바이스가 찾을 수 있도록 세팅.");
+            local = LocalDevice.getLocalDevice();
+            local.setDiscoverable(DiscoveryAgent.GIAC);
+ 
+            System.out.println("커낵터 오픈.");
+            server = (StreamConnectionNotifier) Connector.open(url);
+ 
+            System.out.println("연결을 기다림...");
+            conn = server.acceptAndOpen();
+ 
+            System.out.println("연결됨!");
+            DataInputStream dStream = new DataInputStream(conn.openInputStream());
+            while (true) {
+                
+                byte[] buffer = new byte[500];
+                int bytes;
+                bytes = dStream.read(buffer);
+                String readPosition = new String(buffer, 0, bytes);
+                System.out.println("msg : " + readPosition);
+                String[] positionXY = readPosition.split("/");
+                p = MouseInfo.getPointerInfo().getLocation();
+                r.mouseMove(p.x + Integer.parseInt(positionXY[PX]), p.y +  Integer.parseInt(positionXY[PY]));
+                
+            }
+        } catch (Exception e) {
+            System.out.println( e.toString());
+        }
+    }
+ 
+    public static void main(String args[]) {
+        receiver remoteMouseReceiver = new receiver();
+    }
+}

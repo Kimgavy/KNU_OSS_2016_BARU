@@ -1,0 +1,12 @@
+package blue;
+
+public class bluetest {
+
+	public static void main(String[] args) {
+		Bluetooth aaa = new Bluetooth();
+		aaa.deviceSearch();
+		//aaa.disconnectDevice();
+		//aaa.connectToDevice();
+	}
+
+}

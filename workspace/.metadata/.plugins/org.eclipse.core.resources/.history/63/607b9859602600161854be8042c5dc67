@@ -1,0 +1,10 @@
+package blue;
+
+public class bluetest {
+
+	public static void main(String[] args) {
+		// TODO Auto-generated method stub
+
+	}
+
+}
